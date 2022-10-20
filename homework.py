@@ -14,6 +14,8 @@ from exceptions import (
     ResponseDictEmptyError,
     HomeworksNotInResponseError,
     HomeworksListEmptyError,
+    HomeworksNotListError,
+    HomeworkStatusError,
     StatusError,
     StatusCodeError,
     TokensError,
@@ -66,7 +68,7 @@ def check_response(response):
         raise HomeworksNotInResponseError('Ключа "homeworks" нет в словаре.')
 
     if not isinstance(response["homeworks"], list):
-        raise TypeError("Homeworks не является списком.")
+        raise HomeworksNotListError("Homeworks не является списком.")
 
     return response["homeworks"]
 
@@ -79,7 +81,7 @@ def parse_status(homework):
         raise KeyError("У домашней работы нет имени.")
 
     if "status" not in homework:
-        raise KeyError("У домашней работы нет статуса.")
+        raise HomeworkStatusError("У домашней работы нет статуса.")
 
     homework_name = homework["homework_name"]
     homework_status = homework["status"]
@@ -137,20 +139,16 @@ def main():
 
             current_timestamp = response["current_date"]
 
-        except HomeworksNotInResponseError as error:
+        except (HomeworksNotInResponseError,
+                HomeworksNotListError,
+                HomeworkStatusError,
+                StatusError,
+                StatusCodeError,) as error:
             logging.error(error)
             message_error = f"Сбой в работе программы: {error}"
 
         except HomeworksListEmptyError:
             logging.debug("Статус домашней работы не обновился.")
-
-        except StatusError as error:
-            logging.error(error)
-            message_error = f"Сбой в работе программы: {error}"
-
-        except StatusCodeError as error:
-            logging.error(error)
-            message_error = f"Сбой в работе программы: {error}"
 
         except Exception as error:
             logging.error(error)

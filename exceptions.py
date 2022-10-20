@@ -10,6 +10,14 @@ class HomeworksListEmptyError(Exception):
     pass
 
 
+class HomeworksNotListError(Exception):
+    pass
+
+
+class HomeworkStatusError(Exception):
+    pass
+
+
 class StatusError(Exception):
     pass
 
