@@ -14,8 +14,6 @@ from exceptions import (
     ResponseDictEmptyError,
     HomeworksNotInResponseError,
     HomeworksListEmptyError,
-    HomeworksNotListError,
-    HomeworkStatusError,
     StatusError,
     StatusCodeError,
     TokensError,
@@ -40,7 +38,7 @@ HOMEWORK_STATUSES = {
 
 
 def send_message(bot, message):
-    """Отправка сообщения в Telegram чат"""
+    """Отправка сообщения в Telegram чат."""
     bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
 
@@ -48,7 +46,6 @@ def get_api_answer(current_timestamp):
     """Делает запрос к единственному эндпоинту API-сервиса."""
     timestamp = current_timestamp or int(time.time())
     params = {"from_date": timestamp}
-
     homework_statuses = requests.get(ENDPOINT, headers=HEADERS, params=params)
 
     if homework_statuses.status_code != HTTPStatus.OK:
@@ -69,20 +66,20 @@ def check_response(response):
         raise HomeworksNotInResponseError('Ключа "homeworks" нет в словаре.')
 
     if not isinstance(response["homeworks"], list):
-        raise HomeworksNotListError("Homeworks не является списком.")
+        raise TypeError("Homeworks не является списком.")
 
     return response["homeworks"]
 
 
 def parse_status(homework):
-    """Извлечение из информации о конкретной
-    домашней работе статус этой работы."""
-
+    """Извлечение из информации о конкретной.
+    домашней работе статус этой работы.
+    """
     if "homework_name" not in homework:
         raise KeyError("У домашней работы нет имени.")
 
     if "status" not in homework:
-        raise HomeworkStatusError("У домашней работы нет статуса.")
+        raise KeyError("У домашней работы нет статуса.")
 
     homework_name = homework["homework_name"]
     homework_status = homework["status"]
@@ -108,7 +105,6 @@ def check_tokens():
 
 def main():
     """Основная логика работы бота."""
-
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s %(levelname)s %(message)s",
@@ -117,9 +113,7 @@ def main():
         ],
     )
 
-    if check_tokens():
-        logging.info("С токенами все в порядке.")
-    else:
+    if not check_tokens():
         raise TokensError("Ошибка в токенах!!")
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
@@ -141,20 +135,14 @@ def main():
             else:
                 raise HomeworksListEmptyError("Список Homeworks пустой.")
 
+            current_timestamp = response["current_date"]
+
         except HomeworksNotInResponseError as error:
             logging.error(error)
             message_error = f"Сбой в работе программы: {error}"
 
-        except HomeworksNotListError as error:
-            logging.error(error)
-            message_error = f"Сбой в работе программы: {error}"
-
-        except HomeworksListEmptyError as error:
-            logging.error(error)
-
-        except HomeworkStatusError as error:
-            logging.error(error)
-            message_error = f"Сбой в работе программы: {error}"
+        except HomeworksListEmptyError:
+            logging.debug("Статус домашней работы не обновился.")
 
         except StatusError as error:
             logging.error(error)
@@ -163,9 +151,6 @@ def main():
         except StatusCodeError as error:
             logging.error(error)
             message_error = f"Сбой в работе программы: {error}"
-
-        except TokensError as error:
-            logging.critical(error)
 
         except Exception as error:
             logging.error(error)
@@ -177,15 +162,11 @@ def main():
                 logging.info("Сообщение отправлено")
                 message_before = message
 
-            else:
-                logging.debug("Статус домашней работы не обновился.")
-
             if message_error != message_error_before:
                 send_message(bot, message_error)
                 logging.info("Сообщение отправлено")
                 message_error_before = message_error
 
-            current_timestamp = response["current_date"]
             time.sleep(RETRY_TIME)
 
 
