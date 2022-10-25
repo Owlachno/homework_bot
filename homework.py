@@ -1,21 +1,14 @@
 import logging
 import sys
 import os
-
 import requests
 import time
-
-import telegram
-
-from dotenv import load_dotenv
 from http import HTTPStatus
 
+import telegram
+from dotenv import load_dotenv
+
 from exceptions import (
-    ResponseDictEmptyError,
-    HomeworksNotInResponseError,
-    HomeworksListEmptyError,
-    HomeworksNotListError,
-    HomeworkStatusError,
     StatusError,
     StatusCodeError,
     TokensError,
@@ -32,7 +25,7 @@ ENDPOINT = "https://practicum.yandex.ru/api/user_api/homework_statuses/"
 HEADERS = {"Authorization": f"OAuth {PRACTICUM_TOKEN}"}
 
 
-HOMEWORK_STATUSES = {
+HOMEWORK_VERDICTS = {
     "approved": "Работа проверена: ревьюеру всё понравилось. Ура!",
     "reviewing": "Работа взята на проверку ревьюером.",
     "rejected": "Работа проверена: у ревьюера есть замечания.",
@@ -41,17 +34,31 @@ HOMEWORK_STATUSES = {
 
 def send_message(bot, message):
     """Отправка сообщения в Telegram чат."""
-    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    try:
+        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    except Exception:
+        logging.error("Не получилось отправить "
+                      f"сообщение в чат: {TELEGRAM_CHAT_ID}.")
+    else:
+        logging.info(f"Сообщение отправлено чат: {TELEGRAM_CHAT_ID}")
 
 
 def get_api_answer(current_timestamp):
     """Делает запрос к единственному эндпоинту API-сервиса."""
-    timestamp = current_timestamp or int(time.time())
-    params = {"from_date": timestamp}
+    params = {"from_date": current_timestamp}
     homework_statuses = requests.get(ENDPOINT, headers=HEADERS, params=params)
 
     if homework_statuses.status_code != HTTPStatus.OK:
-        raise StatusCodeError("Статус кода отличается от 200.")
+        raise StatusCodeError(
+            "Статус кода отличается от 200.",
+            f"Пришедший статус: {homework_statuses.status_code}.",
+            f"Адрес: {ENDPOINT}. Заголовки: {HEADERS}."
+        )
+
+    try:
+        homework_statuses.json()
+    except ValueError as error:
+        logging.error(f"Ошибка: {error}. Ответ пришел не в формате json.")
 
     return homework_statuses.json()
 
@@ -59,18 +66,23 @@ def get_api_answer(current_timestamp):
 def check_response(response):
     """Проверка ответа API на корректность."""
     if not isinstance(response, dict):
-        raise TypeError("Ответ приходит не в виде словаря.")
-
-    if not response:
-        raise ResponseDictEmptyError("Словарь пустой!")
+        raise TypeError(
+            "Ответ пришел не в виде словаря.",
+            f"Тип пришедшего объекта: {type(response)}"
+        )
 
     if "homeworks" not in response:
-        raise HomeworksNotInResponseError('Ключа "homeworks" нет в словаре.')
+        raise KeyError('Ключа "homeworks" нет в словаре.')
 
-    if not isinstance(response["homeworks"], list):
-        raise HomeworksNotListError("Homeworks не является списком.")
+    homeworks = response["homeworks"]
 
-    return response["homeworks"]
+    if not isinstance(homeworks, list):
+        raise TypeError(
+            "Homeworks не является списком.",
+            f"Тип объекта:{homeworks}"
+        )
+
+    return homeworks
 
 
 def parse_status(homework):
@@ -81,15 +93,15 @@ def parse_status(homework):
         raise KeyError("У домашней работы нет имени.")
 
     if "status" not in homework:
-        raise HomeworkStatusError("У домашней работы нет статуса.")
+        raise KeyError("У домашней работы нет статуса.")
 
     homework_name = homework["homework_name"]
     homework_status = homework["status"]
 
-    if homework_status not in HOMEWORK_STATUSES:
+    if homework_status not in HOMEWORK_VERDICTS:
         raise StatusError("Недокументированный статус домашней работы.")
 
-    verdict = HOMEWORK_STATUSES[homework_status]
+    verdict = HOMEWORK_VERDICTS[homework_status]
 
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
@@ -98,8 +110,15 @@ def check_tokens():
     """Проверка доступности переменных окружения."""
     tokens = (PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 
-    for token in tokens:
-        if token is None:
+    tokens = [
+        ('PRACTICUM_TOKEN', PRACTICUM_TOKEN),
+        ('TELEGRAM_TOKEN', TELEGRAM_TOKEN),
+        ('TELEGRAM_CHAT_ID', TELEGRAM_CHAT_ID)
+    ]
+
+    for name, value in tokens:
+        if value is None:
+            logging.error(f"Токен {name} недоступен!")
             return False
 
     return True
@@ -107,14 +126,6 @@ def check_tokens():
 
 def main():
     """Основная логика работы бота."""
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-
     if not check_tokens():
         raise TokensError("Ошибка в токенах!!")
 
@@ -134,21 +145,13 @@ def main():
 
             if homeworks:
                 message = parse_status(homeworks[0])
+
+            if 'current_date' not in response:
+                current_timestamp = int(time.time())
+                raise KeyError("В словаре нет даты.")
+
             else:
-                raise HomeworksListEmptyError("Список Homeworks пустой.")
-
-            current_timestamp = response["current_date"]
-
-        except (HomeworksNotInResponseError,
-                HomeworksNotListError,
-                HomeworkStatusError,
-                StatusError,
-                StatusCodeError,) as error:
-            logging.error(error)
-            message_error = f"Сбой в работе программы: {error}"
-
-        except HomeworksListEmptyError:
-            logging.debug("Статус домашней работы не обновился.")
+                current_timestamp = response['current_date']
 
         except Exception as error:
             logging.error(error)
@@ -157,16 +160,28 @@ def main():
         finally:
             if message != message_before:
                 send_message(bot, message)
-                logging.info("Сообщение отправлено")
                 message_before = message
+
+            else:
+                logging.debug("Статус домашней работы не обновился.")
 
             if message_error != message_error_before:
                 send_message(bot, message_error)
-                logging.info("Сообщение отправлено")
                 message_error_before = message_error
 
             time.sleep(RETRY_TIME)
 
 
 if __name__ == "__main__":
+
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format=("%(asctime)s - [%(levelname)s] "
+                "- %(funcName)s(%(lineno)d) - %(message)s"),
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(filename='hwbot_log.log'),
+        ],
+    )
+
     main()
