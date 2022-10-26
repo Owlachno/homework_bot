@@ -1,15 +1,14 @@
 import logging
-import sys
 import os
 import requests
+import sys
+import telegram
 import time
+
+from dotenv import load_dotenv
 from http import HTTPStatus
 
-import telegram
-from dotenv import load_dotenv
-
 from exceptions import (
-    StatusError,
     StatusCodeError,
     TokensError,
 )
@@ -36,8 +35,8 @@ def send_message(bot, message):
     """Отправка сообщения в Telegram чат."""
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-    except Exception:
-        logging.error("Не получилось отправить "
+    except Exception as error:
+        logging.error(f"Ошибка: {error}. Не получилось отправить "
                       f"сообщение в чат: {TELEGRAM_CHAT_ID}.")
     else:
         logging.info(f"Сообщение отправлено чат: {TELEGRAM_CHAT_ID}")
@@ -46,7 +45,17 @@ def send_message(bot, message):
 def get_api_answer(current_timestamp):
     """Делает запрос к единственному эндпоинту API-сервиса."""
     params = {"from_date": current_timestamp}
-    homework_statuses = requests.get(ENDPOINT, headers=HEADERS, params=params)
+
+    try:
+        homework_statuses = requests.get(ENDPOINT,
+                                         headers=HEADERS,
+                                         params=params)
+    except Exception as error:
+        logging.error(f"Ошибка в GET-запросе:{error}")
+
+    if int(homework_statuses.status_code / 100) == 5:
+        raise StatusCodeError("Ошибка со стороны "
+                              f"сервера:{homework_statuses.status_code}")
 
     if homework_statuses.status_code != HTTPStatus.OK:
         raise StatusCodeError(
@@ -54,11 +63,6 @@ def get_api_answer(current_timestamp):
             f"Пришедший статус: {homework_statuses.status_code}.",
             f"Адрес: {ENDPOINT}. Заголовки: {HEADERS}."
         )
-
-    try:
-        homework_statuses.json()
-    except ValueError as error:
-        logging.error(f"Ошибка: {error}. Ответ пришел не в формате json.")
 
     return homework_statuses.json()
 
@@ -79,7 +83,7 @@ def check_response(response):
     if not isinstance(homeworks, list):
         raise TypeError(
             "Homeworks не является списком.",
-            f"Тип объекта:{homeworks}"
+            f"Тип объекта:{type(homeworks)}"
         )
 
     return homeworks
@@ -99,7 +103,8 @@ def parse_status(homework):
     homework_status = homework["status"]
 
     if homework_status not in HOMEWORK_VERDICTS:
-        raise StatusError("Недокументированный статус домашней работы.")
+        raise KeyError("Недокументированный статус "
+                       f"домашней работы: {homework_status}")
 
     verdict = HOMEWORK_VERDICTS[homework_status]
 
@@ -108,19 +113,21 @@ def parse_status(homework):
 
 def check_tokens():
     """Проверка доступности переменных окружения."""
-    tokens = (PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
-
     tokens = [
         ('PRACTICUM_TOKEN', PRACTICUM_TOKEN),
         ('TELEGRAM_TOKEN', TELEGRAM_TOKEN),
         ('TELEGRAM_CHAT_ID', TELEGRAM_CHAT_ID)
     ]
 
+    cnt_token_none = 0
+
     for name, value in tokens:
         if value is None:
-            logging.error(f"Токен {name} недоступен!")
-            return False
+            logging.critical(f"Токен {name} недоступен!")
+            cnt_token_none += 1
 
+    if cnt_token_none > 0:
+        return False
     return True
 
 
@@ -140,18 +147,15 @@ def main():
     while True:
         try:
             response = get_api_answer(current_timestamp)
-
             homeworks = check_response(response)
 
             if homeworks:
                 message = parse_status(homeworks[0])
 
-            if 'current_date' not in response:
-                current_timestamp = int(time.time())
-                raise KeyError("В словаре нет даты.")
-
-            else:
-                current_timestamp = response['current_date']
+            try:
+                current_timestamp = response.get('current_date')
+            except Exception as error:
+                logging.error(f"Ошибка получения даты из словаря: {error}")
 
         except Exception as error:
             logging.error(error)
@@ -174,13 +178,18 @@ def main():
 
 if __name__ == "__main__":
 
+    log_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        'hwbot_log.log'
+    )
+
     logging.basicConfig(
         level=logging.DEBUG,
         format=("%(asctime)s - [%(levelname)s] "
                 "- %(funcName)s(%(lineno)d) - %(message)s"),
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler(filename='hwbot_log.log'),
+            logging.FileHandler(filename=log_path),
         ],
     )
 

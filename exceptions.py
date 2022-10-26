@@ -1,7 +1,3 @@
-class StatusError(Exception):
-    pass
-
-
 class TokensError(Exception):
     pass
 
