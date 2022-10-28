@@ -2,8 +2,10 @@ import logging
 import os
 import requests
 import sys
-import telegram
 import time
+
+import telegram
+
 
 from dotenv import load_dotenv
 from http import HTTPStatus
@@ -36,8 +38,8 @@ def send_message(bot, message):
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
     except Exception as error:
-        logging.error(f"Ошибка: {error}. Не получилось отправить "
-                      f"сообщение в чат: {TELEGRAM_CHAT_ID}.")
+        raise Exception(f"Ошибка: {error}. Не получилось отправить "
+                        f"сообщение в чат: {TELEGRAM_CHAT_ID}.")
     else:
         logging.info(f"Сообщение отправлено чат: {TELEGRAM_CHAT_ID}")
 
@@ -51,17 +53,18 @@ def get_api_answer(current_timestamp):
                                          headers=HEADERS,
                                          params=params)
     except Exception as error:
-        logging.error(f"Ошибка в GET-запросе:{error}")
-
-    if int(homework_statuses.status_code / 100) == 5:
-        raise StatusCodeError("Ошибка со стороны "
-                              f"сервера:{homework_statuses.status_code}")
+        raise Exception(
+            f"Ошибка в GET-запросе к API сервиса Яндекс.Практикум: {error}. "
+            f"Адрес: {ENDPOINT}. Заголовки: {HEADERS}. "
+            f"Параметры: {params}."
+        )
 
     if homework_statuses.status_code != HTTPStatus.OK:
         raise StatusCodeError(
-            "Статус кода отличается от 200.",
-            f"Пришедший статус: {homework_statuses.status_code}.",
-            f"Адрес: {ENDPOINT}. Заголовки: {HEADERS}."
+            "Статус кода отличается от 200. "
+            f"Пришедший статус: {homework_statuses.status_code}. "
+            f"Адрес: {ENDPOINT}. Заголовки: {HEADERS}. "
+            f"Параметры: {params}."
         )
 
     return homework_statuses.json()
@@ -119,14 +122,14 @@ def check_tokens():
         ('TELEGRAM_CHAT_ID', TELEGRAM_CHAT_ID)
     ]
 
-    cnt_token_none = 0
+    check_token = True
 
     for name, value in tokens:
         if value is None:
             logging.critical(f"Токен {name} недоступен!")
-            cnt_token_none += 1
+            check_token = False
 
-    if cnt_token_none > 0:
+    if not check_token:
         return False
     return True
 
@@ -137,7 +140,7 @@ def main():
         raise TokensError("Ошибка в токенах!!")
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    current_timestamp = int(time.time())
+    current_timestamp = 0
 
     message_before = None
     message_error_before = None
@@ -148,36 +151,30 @@ def main():
         try:
             response = get_api_answer(current_timestamp)
             homeworks = check_response(response)
+            current_timestamp = response.get('current_date', int(time.time()))
 
             if homeworks:
                 message = parse_status(homeworks[0])
 
-            try:
-                current_timestamp = response.get('current_date')
-            except Exception as error:
-                logging.error(f"Ошибка получения даты из словаря: {error}")
-
-        except Exception as error:
-            logging.error(error)
-            message_error = f"Сбой в работе программы: {error}"
-
-        finally:
             if message != message_before:
                 send_message(bot, message)
                 message_before = message
-
             else:
                 logging.debug("Статус домашней работы не обновился.")
+
+        except Exception as error:
+            logging.error(error)
+            message_error = f"Сбой в работе программы. {error}"
 
             if message_error != message_error_before:
                 send_message(bot, message_error)
                 message_error_before = message_error
 
+        finally:
             time.sleep(RETRY_TIME)
 
 
 if __name__ == "__main__":
-
     log_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         'hwbot_log.log'
