@@ -1,19 +1,14 @@
 import logging
 import os
-import requests
 import sys
 import time
-
-import telegram
-
-
-from dotenv import load_dotenv
 from http import HTTPStatus
 
-from exceptions import (
-    StatusCodeError,
-    TokensError,
-)
+import requests
+import telegram
+from dotenv import load_dotenv
+
+from exceptions import StatusCodeError, TokensError
 
 load_dotenv()
 
@@ -38,8 +33,8 @@ def send_message(bot, message):
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
     except Exception as error:
-        raise Exception(f"Ошибка: {error}. Не получилось отправить "
-                        f"сообщение в чат: {TELEGRAM_CHAT_ID}.")
+        logging.error(f"Ошибка: {error}. Не получилось отправить "
+                      f"сообщение в чат: {TELEGRAM_CHAT_ID}.")
     else:
         logging.info(f"Сообщение отправлено чат: {TELEGRAM_CHAT_ID}")
 
@@ -128,10 +123,7 @@ def check_tokens():
         if value is None:
             logging.critical(f"Токен {name} недоступен!")
             check_token = False
-
-    if not check_token:
-        return False
-    return True
+    return check_token
 
 
 def main():
