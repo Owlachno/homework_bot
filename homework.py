@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import sys
@@ -16,7 +17,7 @@ PRACTICUM_TOKEN = os.getenv("PRACTICUM_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-RETRY_TIME = 600
+RETRY_TIME = 500
 ENDPOINT = "https://practicum.yandex.ru/api/user_api/homework_statuses/"
 HEADERS = {"Authorization": f"OAuth {PRACTICUM_TOKEN}"}
 
@@ -126,13 +127,28 @@ def check_tokens():
     return check_token
 
 
+def get_current_time():
+    """Создание точки отсчета для последующих запросов."""
+    payload = {"url": ENDPOINT, "headers": HEADERS, "params": {"from_date": 0}}
+    response: requests.models.Response = requests.get(**payload)
+    try:
+        response_json = response.json()
+        last_homework = response_json["homeworks"][0]
+        if last_homework["status"] == "approved":
+            return response_json["current_date"]
+        date_: str = last_homework["date_updated"]
+        return datetime.fromisoformat(date_[:-1])
+    except Exception:
+        return int(datetime.utcnow().timestamp())
+
+
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
         raise TokensError("Ошибка в токенах!!")
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    current_timestamp = 0
+    current_timestamp = get_current_time()
 
     message_before = None
     message_error_before = None
