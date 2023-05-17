@@ -139,7 +139,7 @@ def get_current_time():
         date_: str = last_homework["date_updated"]
         return datetime.fromisoformat(date_[:-1])
     except Exception:
-        return int(datetime.utcnow().timestamp())
+        return int(datetime.datetime.utcnow().timestamp())
 
 
 def main():
